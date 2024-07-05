@@ -1,0 +1,28 @@
+[build]
+  # Working directory
+  # . means the root directory of your project
+  bin = "tmp/main" # Output binary path
+  cmd = "go build -o ./tmp/main" # Command to build your application
+  # . means the root directory of your project
+  main = "." # . means the root directory of your project
+
+[log]
+  level = "debug"
+
+[watch]
+  # Watch these directories for changes
+  # . means the root directory of your project
+  dirs = [
+    ".",
+  ]
+  # Ignore these files or directories
+  ignore = [
+    "tmp",
+    "vendor",
+    "node_modules",
+    "air.toml",
+  ]
+
+[dev]
+  # Exclude this pattern from the final binary path
+  exclude = "tmp"
