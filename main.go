@@ -166,6 +166,7 @@ func (s *WebSocketServer) handleConnections(w http.ResponseWriter, r *http.Reque
 			break
 		}
 
+		fmt.Printf("message: %s\n", message)
 		for client := range room.clients {
 			if err := client.WriteMessage(websocket.TextMessage, message); err != nil {
 				log.Println(err)
