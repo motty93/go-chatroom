@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -175,14 +176,71 @@ func (s *WebSocketServer) handleConnections(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+func (s *WebSocketServer) joinRoom(w http.ResponseWriter, r *http.Request) {
+	tmpl := template.Must(template.ParseFiles("template/index.html.tmpl"))
+
+	vars := mux.Vars(r)
+	roomID := vars["roomID"]
+
+	if db == nil {
+		http.Error(w, "Database not configured", http.StatusInternalServerError)
+		return
+	}
+
+	var isClosed bool
+	err := db.QueryRow("SELECT is_closed FROM rooms WHERE id=$1", roomID).Scan(&isClosed)
+	if err != nil {
+		http.Error(w, "Room does not exist", http.StatusNotFound)
+		return
+	}
+
+	if isClosed {
+		http.Error(w, "Room is closed", http.StatusForbidden)
+		return
+	}
+
+	var exists bool
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE id=$1)", roomID).Scan(&exists)
+	if err != nil || !exists {
+		http.Error(w, "Room does not exist", http.StatusNotFound)
+		return
+	}
+
+	data := map[string]string{
+		"Title":  "チャットルーム",
+		"RoomID": roomID,
+	}
+	err = tmpl.Execute(w, data)
+	if err != nil {
+		http.Error(w, "Template parse error", http.StatusNotFound)
+	}
+}
+
+func (s *WebSocketServer) healthCheckTemplate(w http.ResponseWriter, r *http.Request) {
+	tmpl := template.Must(template.ParseFiles("template/health.html.tmpl"))
+	vars := mux.Vars(r)
+	id := vars["id"]
+	data := map[string]string{
+		"Title": "HealthCheck",
+		"id":    id,
+	}
+
+	err := tmpl.Execute(w, data)
+	if err != nil {
+		http.Error(w, "Template parse error", http.StatusNotFound)
+	}
+}
+
 func main() {
 	s := newWebSocketServer()
 
 	r := mux.NewRouter()
 	r.HandleFunc("/health", s.healthCheck)
+	r.HandleFunc("/health/{id}", s.healthCheckTemplate)
 	r.HandleFunc("/", s.healthCheck)
 	r.HandleFunc("/close-room/{roomID}", s.closeRoom).Methods("POST")
 	r.HandleFunc("/create-room/{roomID}", s.closeRoom).Methods("POST")
+	r.HandleFunc("/rooms/{roomID}", s.joinRoom)
 	r.HandleFunc("/ws/{roomID}", s.handleConnections)
 
 	origins := []string{"*"}

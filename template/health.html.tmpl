@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>{{.Title}}</title>
+    <script>
+      function checkIDAlert(id) {
+        alert(`health check: ${id}`);
+      }
+    </script>
+  </head>
+  <body>
+    <h1>ID: {{.id}}</h1>
+    <button onclick="checkIDAlert({{.id}})">Health Check</button>
+  </body>
+</html>

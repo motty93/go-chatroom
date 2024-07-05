@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>{{.Title}}</title>
+    <script>
+      var socket;
+
+      function connectWebSocket(roomID) {
+        socket = new WebSocket(`ws://localhost:8080/ws/${roomID}`);
+
+        socket.onopen = function(event) {
+          console.log("WebSocket is open now.");
+          socket.send("Hello from the client!");
+        };
+
+        socket.onmessage = function(event) {
+          console.log("Message from server ", event.data);
+          document.getElementById("serverMessage").innerText = event.data;
+        };
+
+        socket.onclose = function(event) {
+          console.log("WebSocket is closed now.");
+        };
+
+        socket.onerror = function(error) {
+          console.log("WebSocket error: ", error);
+        };
+      }
+
+      function sendMessage() {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send("Client says hello!");
+        } else {
+          alert("WebSocket is not connected.");
+        }
+      }
+    </script>
+  </head>
+  <body onload="connectWebSocket({{.RoomID}})">
+    <h1>RoomID: {{.RoomID}}</h1>
+    <button onclick="sendMessage()">Send Message</button>
+    <p>Message from server: <span id="serverMessage"></span></p>
+  </body>
+</html>
