@@ -180,6 +180,8 @@ func main() {
 	r.HandleFunc("/health", s.healthCheck)
 	r.HandleFunc("/", s.healthCheck)
 	r.HandleFunc("/close-room/{roomID}", s.closeRoom).Methods("POST")
+	r.HandleFunc("/create-room/{roomID}", s.closeRoom).Methods("POST")
+	r.HandleFunc("/ws/{roomID}", s.handleConnections)
 
 	origins := []string{"*"}
 
