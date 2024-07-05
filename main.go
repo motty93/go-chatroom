@@ -71,6 +71,8 @@ func (s *WebSocketServer) healthCheck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Database connection error.", http.StatusInternalServerError)
 	}
 
+	fmt.Println("healthy!!!!!!!!!!!")
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
 }
