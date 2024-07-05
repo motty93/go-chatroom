@@ -2,11 +2,55 @@
 <html>
   <head>
     <title>{{.Title}}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background-color: #f4f4f4;
+      }
+      .container {
+        text-align: center;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        width: 320px; /* 固定幅 */
+        max-width: 100%; /* 小さい画面での調整 */
+      }
+      button {
+        background-color: #007BFF;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        margin-top: 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      button:hover {
+        background-color: #0056b3;
+      }
+      h1 {
+        color: #333;
+      }
+      p {
+        color: #666;
+      }
+    </style>
   </head>
   <body>
-    <h1>RoomID: {{.RoomID}}</h1>
-    <button onclick="sendMessage()">Send Message</button>
-    <p>Message from server: <span id="serverMessage"></span></p>
+    <div class="container">
+      <h1>RoomID: {{.RoomID}}</h1>
+      <button onclick="sendMessage()">Send Message</button>
+      <p>Message from server: <span id="serverMessage"></span></p>
+    </div>
 
     <script>
       var socket;
