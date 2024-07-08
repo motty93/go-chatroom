@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"embed"
 	"fmt"
 	"html/template"
 	"log"
@@ -11,9 +12,13 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
+
+//go:embed templates/*
+var resources embed.FS
 
 var (
 	db       *sql.DB
@@ -178,8 +183,6 @@ func (s *WebSocketServer) handleConnections(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *WebSocketServer) joinRoom(w http.ResponseWriter, r *http.Request) {
-	tmpl := template.Must(template.ParseFiles("template/index.html.tmpl"))
-
 	vars := mux.Vars(r)
 	roomID := vars["roomID"]
 
@@ -211,22 +214,23 @@ func (s *WebSocketServer) joinRoom(w http.ResponseWriter, r *http.Request) {
 		"Title":  "チャットルーム",
 		"RoomID": roomID,
 	}
-	err = tmpl.Execute(w, data)
+	t := template.Must(template.ParseFS(resources, "templates/*"))
+	err = t.ExecuteTemplate(w, "index.html.tmpl", data)
 	if err != nil {
 		http.Error(w, "Template parse error", http.StatusNotFound)
 	}
 }
 
 func (s *WebSocketServer) healthCheckTemplate(w http.ResponseWriter, r *http.Request) {
-	tmpl := template.Must(template.ParseFiles("template/health.html.tmpl"))
 	vars := mux.Vars(r)
 	id := vars["id"]
 	data := map[string]string{
 		"Title": "HealthCheck",
 		"id":    id,
 	}
+	t := template.Must(template.ParseFS(resources, "templates/*"))
 
-	err := tmpl.Execute(w, data)
+	err := t.ExecuteTemplate(w, "health.html.tmpl", data)
 	if err != nil {
 		http.Error(w, "Template parse error", http.StatusNotFound)
 	}
