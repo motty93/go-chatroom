@@ -56,7 +56,9 @@
       var socket;
 
       function connectWebSocket(roomID) {
-        socket = new WebSocket("ws://localhost:8080/ws/" + roomID);
+        wsScheme = window.location.protocol === "https:" ? "wss://" : "ws://";
+        wsUrl = wsScheme + window.location.host + "/ws/" + roomID;
+        socket = new WebSocket(wsUrl);
 
         socket.onopen = function(event) {
           console.log("WebSocket is open now.");
