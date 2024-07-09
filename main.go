@@ -48,7 +48,7 @@ func init() {
 	dbUrl := os.Getenv("DB_URL")
 	db, err = sql.Open("postgres", dbUrl)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Println(err)
 	}
 
 	_, err = db.Exec("CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY)")
