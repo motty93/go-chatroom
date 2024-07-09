@@ -251,7 +251,7 @@ func main() {
 	origins := []string{"*"}
 
 	fmt.Println("Server started on :8080")
-	err := http.ListenAndServe(":8080", allowOrigins(origins)(r))
+	err := http.ListenAndServe("0.0.0.0:8080", allowOrigins(origins)(r))
 	if err != nil {
 		fmt.Println("Failed to start server:", err)
 	}
