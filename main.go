@@ -42,13 +42,13 @@ func init() {
 
 	err = godotenv.Load()
 	if err != nil {
-		log.Fatalf("Error loading .env file")
+		fmt.Println("Error loading .env file")
 	}
 
 	dbUrl := os.Getenv("DB_URL")
 	db, err = sql.Open("postgres", dbUrl)
 	if err != nil {
-		fmt.Println(err)
+		log.Fatal(err)
 	}
 
 	_, err = db.Exec("CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY)")
