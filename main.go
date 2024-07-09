@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -35,6 +36,16 @@ type Room struct {
 
 type WebSocketServer struct {
 	rooms map[string]*Room
+}
+
+type RoomResponse struct {
+	RoomID  string `json:"roomID"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+type RoomRequestData struct {
+	RoomId string `json:"room_id"`
 }
 
 func init() {
@@ -83,32 +94,68 @@ func (s *WebSocketServer) healthCheck(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
-func (s *WebSocketServer) createRoom(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	roomID := vars["roomID"]
+func (s *WebSocketServer) findOrCreateRoom(w http.ResponseWriter, r *http.Request) {
+	var reqData RoomRequestData
+
+	err := json.NewDecoder(r.Body).Decode(&reqData)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
 
 	if db == nil {
 		http.Error(w, "Database not configured", http.StatusInternalServerError)
 		return
 	}
 
-	stmt, err := db.Prepare("INSERT INTO rooms(id) VALUES($1)")
+	var exists bool
+	roomID := reqData.RoomId
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE id=$1)", roomID).Scan(&exists)
 	if err != nil {
-		http.Error(w, "Error preparing SQL statement", http.StatusInternalServerError)
-		return
-	}
-	_, err = stmt.Exec(roomID)
-	if err != nil {
-		http.Error(w, "Error executing SQL statement", http.StatusInternalServerError)
+		http.Error(w, "Room does not exist", http.StatusNotFound)
 		return
 	}
 
-	fmt.Fprintf(w, "Room %s created", roomID)
+	var res RoomResponse
+	if exists {
+		res = RoomResponse{
+			RoomID:  roomID,
+			Status:  "success",
+			Message: "ご指定のroomIDは既に存在します。",
+		}
+	} else {
+		stmt, err := db.Prepare("INSERT INTO rooms(id) VALUES($1)")
+		if err != nil {
+			http.Error(w, "Error preparing SQL statement", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = stmt.Exec(roomID)
+		if err != nil {
+			http.Error(w, "Error executing SQL statement", http.StatusInternalServerError)
+			return
+		}
+
+		res = RoomResponse{
+			RoomID:  roomID,
+			Status:  "success",
+			Message: "新しいroomを作成しました。",
+		}
+	}
+	w.Header().Set("content-type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	json.NewEncoder(w).Encode(res)
 }
 
 func (s *WebSocketServer) closeRoom(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-	roomID := vars["roomID"]
+	var reqData RoomRequestData
+
+	err := json.NewDecoder(r.Body).Decode(&reqData)
+	if err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
 
 	if db == nil {
 		http.Error(w, "Database not configured", http.StatusInternalServerError)
@@ -120,6 +167,7 @@ func (s *WebSocketServer) closeRoom(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error preparing SQL statement", http.StatusInternalServerError)
 		return
 	}
+	roomID := reqData.RoomId
 	_, err = stmt.Exec(roomID)
 	if err != nil {
 		http.Error(w, "Error executing SQL statement", http.StatusInternalServerError)
@@ -243,8 +291,8 @@ func main() {
 	r.HandleFunc("/health", s.healthCheck)
 	r.HandleFunc("/health/{id}", s.healthCheckTemplate)
 	r.HandleFunc("/", s.healthCheck)
-	r.HandleFunc("/close-room/{roomID}", s.closeRoom).Methods("POST")
-	r.HandleFunc("/create-room/{roomID}", s.closeRoom).Methods("POST")
+	r.HandleFunc("/close-room", s.closeRoom).Methods("POST")
+	r.HandleFunc("/rooms", s.findOrCreateRoom).Methods("POST")
 	r.HandleFunc("/rooms/{roomID}", s.joinRoom)
 	r.HandleFunc("/ws/{roomID}", s.handleConnections)
 
