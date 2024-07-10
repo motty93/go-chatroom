@@ -148,6 +148,42 @@ func (s *WebSocketServer) findOrCreateRoom(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(res)
 }
 
+func (s *WebSocketServer) findRoom(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	roomID := vars["roomID"]
+
+	if db == nil {
+		http.Error(w, "Database not configured", http.StatusInternalServerError)
+		return
+	}
+
+	var exists bool
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE id=$1)", roomID).Scan(&exists)
+	if err != nil {
+		http.Error(w, "Room does not exist", http.StatusNotFound)
+		return
+	}
+
+	var res RoomResponse
+	if exists {
+		res = RoomResponse{
+			RoomID:  roomID,
+			Status:  "success",
+			Message: "Roomが見つかりました！",
+		}
+	} else {
+		res = RoomResponse{
+			RoomID:  roomID,
+			Status:  "failed",
+			Message: "Roomは存在しません。",
+		}
+	}
+	w.Header().Set("content-type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	json.NewEncoder(w).Encode(res)
+}
+
 func (s *WebSocketServer) closeRoom(w http.ResponseWriter, r *http.Request) {
 	var reqData RoomRequestData
 
@@ -294,6 +330,7 @@ func main() {
 	r.HandleFunc("/close-room", s.closeRoom).Methods("POST")
 	r.HandleFunc("/rooms", s.findOrCreateRoom).Methods("POST")
 	r.HandleFunc("/rooms/{roomID}", s.joinRoom)
+	r.HandleFunc("/room/{roomID}", s.findRoom)
 	r.HandleFunc("/ws/{roomID}", s.handleConnections)
 
 	origins := []string{"*"}
