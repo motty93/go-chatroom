@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"golang.org/x/oauth2"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -30,7 +32,16 @@ var (
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	}
+	oauthConfig      *oauth2.Config
+	oauthStateString = "pseudo-random"
 )
+
+type User struct {
+	ID            string `json:"id"`
+	Email         string `json:"email"`
+	VerifiedEmail bool   `json:"verified_email"`
+	Picture       string `json:"picture"`
+}
 
 type Room struct {
 	id      string
@@ -85,7 +96,7 @@ func allowOrigins(origins []string) func(http.Handler) http.Handler {
 	)
 }
 
-func (s *WebSocketServer) healthCheck(w http.ResponseWriter, r *http.Request) {
+func healthCheck(w http.ResponseWriter, r *http.Request) {
 	err := db.Ping()
 	if err != nil {
 		http.Error(w, "Database connection error.", http.StatusInternalServerError)
@@ -302,13 +313,13 @@ func (s *WebSocketServer) joinRoom(w http.ResponseWriter, r *http.Request) {
 		"RoomID": roomID,
 	}
 	t := template.Must(template.ParseFS(resources, "templates/*"))
-	err = t.ExecuteTemplate(w, "index.html.tmpl", data)
+	err = t.ExecuteTemplate(w, "rooms.html.tmpl", data)
 	if err != nil {
 		http.Error(w, "Template parse error", http.StatusNotFound)
 	}
 }
 
-func (s *WebSocketServer) healthCheckTemplate(w http.ResponseWriter, r *http.Request) {
+func healthCheckTemplate(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id := vars["id"]
 	data := map[string]string{
@@ -323,13 +334,61 @@ func (s *WebSocketServer) healthCheckTemplate(w http.ResponseWriter, r *http.Req
 	}
 }
 
+func index(w http.ResponseWriter, r *http.Request) {
+	t := template.Must(template.ParseFS(resources, "templates/index.html.tmpl"))
+
+	t.Execute(w, nil)
+}
+
+func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
+	url := oauthConfig.AuthCodeURL(oauthStateString)
+	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
+}
+
+func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
+	content, err := getUserInfo(r.FormValue("state"), r.FormValue("code"))
+	if err != nil {
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+
+	fmt.Fprintf(w, "UserInfo: %s\n", content)
+}
+
+func getUserInfo(state string, code string) ([]byte, error) {
+	if state != oauthStateString {
+		return nil, fmt.Errorf("invalid oauth state")
+	}
+
+	ctx := context.Background()
+	token, err := oauthConfig.Exchange(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("code exchange failed: %s", err.Error())
+	}
+
+	res, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + token.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed getting user info: %s", err.Error())
+	}
+	defer res.Body.Close()
+
+	var user User
+	if json.NewDecoder(res.Body).Decode(&user); err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(user)
+}
+
 func main() {
 	s := newWebSocketServer()
 
 	r := mux.NewRouter()
-	r.HandleFunc("/health", s.healthCheck)
-	r.HandleFunc("/health/{id}", s.healthCheckTemplate)
-	r.HandleFunc("/", s.healthCheck)
+	r.HandleFunc("/", index)
+	r.HandleFunc("/login", handleGoogleLogin)
+	r.HandleFunc("/callback", handleGoogleCallBack)
+	r.HandleFunc("/health", healthCheck)
+	r.HandleFunc("/health/{id}", healthCheckTemplate)
 	r.HandleFunc("/close-room", s.closeRoom).Methods("POST")
 	r.HandleFunc("/rooms", s.findOrCreateRoom).Methods("POST")
 	r.HandleFunc("/rooms/{roomID}", s.joinRoom)
