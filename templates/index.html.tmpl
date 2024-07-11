@@ -1,7 +1,7 @@
 <!DOCTYPE html>
-<html>
+<html lang="ja">
   <head>
-    <title>{{.Title}}</title>
+    <title>Google Login</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
@@ -47,50 +47,8 @@
   </head>
   <body>
     <div class="container">
-      <h1>RoomID: {{.RoomID}}</h1>
-      <button onclick="sendMessage()">Send Message</button>
-      <p>Message from server: <span id="serverMessage"></span></p>
+      <h2>ログインしてください。</h2>
+      <button onclick="window.location.href='/login'">Google Login</button>
     </div>
-
-    <script>
-      var socket;
-
-      function connectWebSocket(roomID) {
-        wsScheme = window.location.protocol === "https:" ? "wss://" : "ws://";
-        wsUrl = wsScheme + window.location.host + "/ws/" + roomID;
-        socket = new WebSocket(wsUrl);
-
-        socket.onopen = function(event) {
-          console.log("WebSocket is open now.");
-          socket.send("Hello from the client!");
-        };
-
-        socket.onmessage = function(event) {
-          console.log("Message from server ", event.data);
-          document.getElementById("serverMessage").innerText = event.data;
-        };
-
-        socket.onclose = function(event) {
-          console.log("WebSocket is closed now.");
-        };
-
-        socket.onerror = function(error) {
-          console.log("WebSocket error: ", error);
-        };
-      }
-
-      function sendMessage() {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send("Client says hello!");
-        } else {
-          alert("WebSocket is not connected.");
-        }
-      }
-
-      window.onload = function() {
-        const roomId = "{{.RoomID | js}}";
-        connectWebSocket(roomId);
-      }
-    </script>
   </body>
 </html>
