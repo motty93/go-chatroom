@@ -13,8 +13,10 @@ import (
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
+	"github.com/gorilla/sessions"
 	"github.com/gorilla/websocket"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -34,6 +36,7 @@ var (
 	}
 	oauthConfig      *oauth2.Config
 	oauthStateString = "pseudo-random"
+	store            = sessions.NewCookieStore([]byte("something-very-secret"))
 )
 
 type User struct {
@@ -80,6 +83,14 @@ func init() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	oauthConfig = &oauth2.Config{
+		RedirectURL:  os.Getenv("API_URL") + "/callback",
+		ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+		ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
+		Endpoint:     google.Endpoint,
+	}
 }
 
 func newWebSocketServer() *WebSocketServer {
@@ -94,6 +105,45 @@ func allowOrigins(origins []string) func(http.Handler) http.Handler {
 		handlers.AllowedMethods([]string{"POST", "GET", "OPTIONS"}),
 		handlers.AllowedHeaders([]string{"Content-Type"}),
 	)
+}
+
+func isAuthenticated(next http.HandlerFunc) http.HandlerFunc {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		session, _ := store.Get(r, "session-name")
+
+		_, ok := session.Values["user"]
+		if !ok {
+			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+func getUserInfo(state string, code string) ([]byte, error) {
+	if state != oauthStateString {
+		return nil, fmt.Errorf("invalid oauth state")
+	}
+
+	ctx := context.Background()
+	token, err := oauthConfig.Exchange(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("code exchange failed: %s", err.Error())
+	}
+
+	res, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + token.AccessToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed getting user info: %s", err.Error())
+	}
+	defer res.Body.Close()
+
+	var user User
+	if json.NewDecoder(res.Body).Decode(&user); err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(user)
 }
 
 func healthCheck(w http.ResponseWriter, r *http.Request) {
@@ -334,7 +384,7 @@ func healthCheckTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func index(w http.ResponseWriter, r *http.Request) {
+func handleIndex(w http.ResponseWriter, r *http.Request) {
 	t := template.Must(template.ParseFS(resources, "templates/index.html.tmpl"))
 
 	t.Execute(w, nil)
@@ -352,43 +402,39 @@ func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse user info
+	var user User
+	json.Unmarshal(content, &user)
+
+	// Store user info in session
+	session, _ := store.Get(r, "session-name")
+	session.Values["user"] = user
+	session.Save(r, w)
+
 	fmt.Fprintf(w, "UserInfo: %s\n", content)
 }
 
-func getUserInfo(state string, code string) ([]byte, error) {
-	if state != oauthStateString {
-		return nil, fmt.Errorf("invalid oauth state")
-	}
-
-	ctx := context.Background()
-	token, err := oauthConfig.Exchange(ctx, code)
+func handleProtected(w http.ResponseWriter, r *http.Request) {
+	session, err := store.Get(r, "session-name")
 	if err != nil {
-		return nil, fmt.Errorf("code exchange failed: %s", err.Error())
+		http.Error(w, "Session was deprecated.", http.StatusForbidden)
+		return
 	}
 
-	res, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + token.AccessToken)
-	if err != nil {
-		return nil, fmt.Errorf("failed getting user info: %s", err.Error())
-	}
-	defer res.Body.Close()
-
-	var user User
-	if json.NewDecoder(res.Body).Decode(&user); err != nil {
-		return nil, err
-	}
-
-	return json.Marshal(user)
+	user := session.Values["user"].(User)
+	fmt.Fprintf(w, "welcome %s！", user.Email)
 }
 
 func main() {
 	s := newWebSocketServer()
 
 	r := mux.NewRouter()
-	r.HandleFunc("/", index)
+	r.HandleFunc("/", handleIndex)
 	r.HandleFunc("/login", handleGoogleLogin)
 	r.HandleFunc("/callback", handleGoogleCallBack)
 	r.HandleFunc("/health", healthCheck)
 	r.HandleFunc("/health/{id}", healthCheckTemplate)
+	r.HandleFunc("/protected", isAuthenticated(handleProtected))
 	r.HandleFunc("/close-room", s.closeRoom).Methods("POST")
 	r.HandleFunc("/rooms", s.findOrCreateRoom).Methods("POST")
 	r.HandleFunc("/rooms/{roomID}", s.joinRoom)
