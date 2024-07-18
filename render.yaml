@@ -17,7 +17,5 @@ services:
     envVars:
       - key: PORT
         value: 8080
-      - key: DB_URL
-        value: postgresql://androots_chat_messages_owner:u4H5MbwpVDlg@ep-snowy-smoke-a1ed6f2l.ap-southeast-1.aws.neon.tech/androots_chat_messages?sslmode=require
       - key: TZ
         value: Asia/Tokyo

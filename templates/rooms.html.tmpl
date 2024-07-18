@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>{{.Title}}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background-color: #f4f4f4;
+      }
+      .container {
+        text-align: center;
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        width: 320px; /* 固定幅 */
+        max-width: 100%; /* 小さい画面での調整 */
+      }
+      button {
+        background-color: #007BFF;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        margin-top: 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+      button:hover {
+        background-color: #0056b3;
+      }
+      h1 {
+        color: #333;
+      }
+      p {
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>RoomID: {{.RoomID}}</h1>
+      <button onclick="sendMessage()">Send Message</button>
+      <p>Message from server: <span id="serverMessage"></span></p>
+    </div>
+
+    <script>
+      var socket;
+
+      function connectWebSocket(roomID) {
+        wsScheme = window.location.protocol === "https:" ? "wss://" : "ws://";
+        wsUrl = wsScheme + window.location.host + "/ws/" + roomID;
+        socket = new WebSocket(wsUrl);
+
+        socket.onopen = function(event) {
+          console.log("WebSocket is open now.");
+          socket.send("Hello from the client!");
+        };
+
+        socket.onmessage = function(event) {
+          console.log("Message from server ", event.data);
+          document.getElementById("serverMessage").innerText = event.data;
+        };
+
+        socket.onclose = function(event) {
+          console.log("WebSocket is closed now.");
+        };
+
+        socket.onerror = function(error) {
+          console.log("WebSocket error: ", error);
+        };
+      }
+
+      function sendMessage() {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send("Client says hello!");
+        } else {
+          alert("WebSocket is not connected.");
+        }
+      }
+
+      window.onload = function() {
+        const roomId = "{{.RoomID | js}}";
+        connectWebSocket(roomId);
+      }
+    </script>
+  </body>
+</html>
