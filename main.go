@@ -26,7 +26,9 @@ import (
 var resources embed.FS
 
 var (
-	db       *sql.DB
+	db          *sql.DB
+	oauthConfig *oauth2.Config
+
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true
@@ -34,7 +36,6 @@ var (
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	}
-	oauthConfig      *oauth2.Config
 	oauthStateString = "pseudo-random"
 	store            = sessions.NewCookieStore([]byte("something-very-secret"))
 )
