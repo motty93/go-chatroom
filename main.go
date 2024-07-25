@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"embed"
+	"encoding/base64"
+	"encoding/gob"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/sessions"
@@ -26,8 +31,10 @@ import (
 var resources embed.FS
 
 var (
-	db          *sql.DB
-	oauthConfig *oauth2.Config
+	db               *sql.DB
+	oauthConfig      *oauth2.Config
+	oauthStateString string
+	store            *sessions.CookieStore
 
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
@@ -36,8 +43,7 @@ var (
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	}
-	oauthStateString = "pseudo-random"
-	store            = sessions.NewCookieStore([]byte("something-very-secret"))
+	allowedDomains = []string{"androots.co.jp"}
 )
 
 type User struct {
@@ -48,12 +54,17 @@ type User struct {
 }
 
 type Room struct {
+	ID       string `json:"id"`
+	IsClosed bool   `json:"is_closed"`
+}
+
+type WebSocketRoom struct {
 	id      string
 	clients map[*websocket.Conn]bool
 }
 
 type WebSocketServer struct {
-	rooms map[string]*Room
+	rooms map[string]*WebSocketRoom
 }
 
 type RoomResponse struct {
@@ -85,6 +96,10 @@ func init() {
 		log.Fatal(err)
 	}
 
+	// Register User struct for session
+	gob.Register(User{})
+
+	// OAuth2 configuration
 	oauthConfig = &oauth2.Config{
 		RedirectURL:  os.Getenv("API_URL") + "/callback",
 		ClientID:     os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
@@ -92,12 +107,36 @@ func init() {
 		Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
 		Endpoint:     google.Endpoint,
 	}
+	store = sessions.NewCookieStore([]byte(generateRandomKey()))
+	store.Options = &sessions.Options{
+		Path:     "/",
+		MaxAge:   86400 * 7,
+		HttpOnly: true,
+	}
 }
 
 func newWebSocketServer() *WebSocketServer {
 	return &WebSocketServer{
-		rooms: make(map[string]*Room),
+		rooms: make(map[string]*WebSocketRoom),
 	}
+}
+
+func generateRandomKey() string {
+	key := make([]byte, 32) // 32 bytes = 256 bits
+	if _, err := rand.Read(key); err != nil {
+		log.Fatalf("Failed to generate random key: %v", err)
+	}
+
+	return base64.StdEncoding.EncodeToString(key)
+}
+
+func isAllowedDomain(domain string) bool {
+	for _, d := range allowedDomains {
+		if d == domain {
+			return true
+		}
+	}
+	return false
 }
 
 func allowOrigins(origins []string) func(http.Handler) http.Handler {
@@ -110,10 +149,11 @@ func allowOrigins(origins []string) func(http.Handler) http.Handler {
 
 func isAuthenticated(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		session, _ := store.Get(r, "session-name")
-
-		_, ok := session.Values["user"]
-		if !ok {
+		session, _ := store.Get(r, "user-session")
+		fmt.Println("session: ", session.Values)
+		user, ok := session.Values["user"].(User)
+		if !ok || user.Email == "" {
+			log.Printf("User not authenticated. Session values: %+v", session.Values)
 			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 			return
 		}
@@ -155,8 +195,14 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println("healthy!!!!!!!!!!!")
 
+	session, _ := store.Get(r, "user-session")
+	user, ok := session.Values["user"].(User)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ok"))
+	if ok {
+		fmt.Fprintf(w, "welcome %s！", user.Email)
+	} else {
+		w.Write([]byte("ok"))
+	}
 }
 
 func (s *WebSocketServer) findOrCreateRoom(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +349,7 @@ func (s *WebSocketServer) handleConnections(w http.ResponseWriter, r *http.Reque
 
 	room, ok := s.rooms[roomID]
 	if !ok {
-		room = &Room{
+		room = &WebSocketRoom{
 			id:      roomID,
 			clients: make(map[*websocket.Conn]bool),
 		}
@@ -364,10 +410,45 @@ func (s *WebSocketServer) joinRoom(w http.ResponseWriter, r *http.Request) {
 		"RoomID": roomID,
 	}
 	t := template.Must(template.ParseFS(resources, "templates/*"))
-	err = t.ExecuteTemplate(w, "rooms.html.tmpl", data)
+	err = t.ExecuteTemplate(w, "room.html.tmpl", data)
 	if err != nil {
 		http.Error(w, "Template parse error", http.StatusNotFound)
 	}
+}
+
+func (s *WebSocketServer) findAllRooms(w http.ResponseWriter, r *http.Request) {
+	if db == nil {
+		http.Error(w, "Database not configured", http.StatusInternalServerError)
+		return
+	}
+
+	query := "SELECT * FROM rooms WHERE is_closed = FALSE LIMIT 10"
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, "Error querying rooms", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var rooms []Room
+	for rows.Next() {
+		var room Room
+		err := rows.Scan(&room.ID, &room.IsClosed)
+		if err != nil {
+			http.Error(w, "Error scanning rooms", http.StatusInternalServerError)
+			return
+		}
+		rooms = append(rooms, room)
+	}
+
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Error iterating rooms", http.StatusInternalServerError)
+		return
+	}
+
+	t := template.Must(template.ParseFS(resources, "templates/*"))
+	err = t.ExecuteTemplate(w, "rooms.html.tmpl", rooms)
+
 }
 
 func healthCheckTemplate(w http.ResponseWriter, r *http.Request) {
@@ -386,17 +467,48 @@ func healthCheckTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
-	t := template.Must(template.ParseFS(resources, "templates/index.html.tmpl"))
+	session, _ := store.Get(r, "user-session")
+	// ログイン情報があればcallbackと同じHTMLのroomsを表示
+	if user, ok := session.Values["user"].(User); ok && user.Email != "" {
+		fmt.Println("User already authenticated: ", user)
+		t := template.Must(template.ParseFS(resources, "templates/*"))
+		if err := t.ExecuteTemplate(w, "rooms.html.tmpl", user); err != nil {
+			http.Error(w, "Template parse error", http.StatusNotFound)
+		}
+		return
+	}
 
+	t := template.Must(template.ParseFS(resources, "templates/index.html.tmpl"))
 	t.Execute(w, nil)
 }
 
 func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
+	// generate a new state string
+	oauthStateString = uuid.New().String()
+
+	// Store the state string in the session or a temporary storage
+	session, _ := store.Get(r, "user-session")
+	session.Values["oauthState"] = oauthStateString
+	session.Save(r, w)
+
+	// User the state string in the AuthCodeURL
 	url := oauthConfig.AuthCodeURL(oauthStateString)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
 func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
+	session, _ := store.Get(r, "user-session")
+	// ログイン情報があればcallbackと同じHTMLのroomsを表示
+	if user, ok := session.Values["user"].(User); ok && user.Email != "" {
+		fmt.Println("User already authenticated: ", user)
+		t := template.Must(template.ParseFS(resources, "templates/*"))
+		if err := t.ExecuteTemplate(w, "rooms.html.tmpl", user); err != nil {
+			http.Error(w, "Template parse error", http.StatusNotFound)
+		}
+
+		return
+	}
+
 	content, err := getUserInfo(r.FormValue("state"), r.FormValue("code"))
 	if err != nil {
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -405,18 +517,36 @@ func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
 
 	// Parse user info
 	var user User
-	json.Unmarshal(content, &user)
+	if err := json.Unmarshal(content, &user); err != nil {
+		log.Printf("Failed to parse user info: %v", err)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
+	fmt.Println("callback getUser: ", user)
+
+	// check androots domain
+	emailDomain := strings.Split(user.Email, "@")[1]
+	if !isAllowedDomain(emailDomain) {
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
 
 	// Store user info in session
-	session, _ := store.Get(r, "session-name")
 	session.Values["user"] = user
-	session.Save(r, w)
+	if err := session.Save(r, w); err != nil {
+		log.Printf("Failed to save session: %v", err)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
+	}
 
-	fmt.Fprintf(w, "UserInfo: %s\n", content)
+	t := template.Must(template.ParseFS(resources, "templates/*"))
+	if err := t.ExecuteTemplate(w, "callback.html.tmpl", user); err != nil {
+		http.Error(w, "Template parse error", http.StatusNotFound)
+	}
 }
 
 func handleProtected(w http.ResponseWriter, r *http.Request) {
-	session, err := store.Get(r, "session-name")
+	session, err := store.Get(r, "user-session")
 	if err != nil {
 		http.Error(w, "Session was deprecated.", http.StatusForbidden)
 		return
@@ -431,16 +561,20 @@ func main() {
 
 	r := mux.NewRouter()
 	r.HandleFunc("/", handleIndex)
-	r.HandleFunc("/login", handleGoogleLogin)
+	r.HandleFunc("/api/oauth/login", handleGoogleLogin)
 	r.HandleFunc("/callback", handleGoogleCallBack)
+	// health check
 	r.HandleFunc("/health", healthCheck)
 	r.HandleFunc("/health/{id}", healthCheckTemplate)
+	// api
+	r.HandleFunc("/api/close-room", s.closeRoom).Methods("POST")
+	r.HandleFunc("/api/open-room", s.findOrCreateRoom).Methods("POST")
+	// Protected routes
 	r.HandleFunc("/protected", isAuthenticated(handleProtected))
-	r.HandleFunc("/close-room", s.closeRoom).Methods("POST")
-	r.HandleFunc("/rooms", s.findOrCreateRoom).Methods("POST")
-	r.HandleFunc("/rooms/{roomID}", s.joinRoom)
-	r.HandleFunc("/room/{roomID}", s.findRoom)
-	r.HandleFunc("/ws/{roomID}", s.handleConnections)
+	r.HandleFunc("/rooms", isAuthenticated(s.findAllRooms))
+	r.HandleFunc("/rooms/{roomID}", isAuthenticated(s.joinRoom))
+	r.HandleFunc("/room/{roomID}", isAuthenticated(s.findRoom))
+	r.HandleFunc("/ws/{roomID}", isAuthenticated(s.handleConnections))
 
 	origins := []string{"*"}
 
