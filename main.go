@@ -46,15 +46,23 @@ var (
 	allowedDomains = []string{"androots.co.jp"}
 )
 
-type User struct {
+type OAuthUser struct {
 	ID            string `json:"id"`
 	Email         string `json:"email"`
 	VerifiedEmail bool   `json:"verified_email"`
 	Picture       string `json:"picture"`
 }
 
+type UserDTO struct {
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	Picture       string `json:"picture"`
+	GoogleOauthId string `json:"google_oauth_id"`
+}
+
 type Room struct {
 	ID       string `json:"id"`
+	Name     string `json:"name"`
 	IsClosed bool   `json:"is_closed"`
 }
 
@@ -68,13 +76,13 @@ type WebSocketServer struct {
 }
 
 type RoomResponse struct {
-	RoomID  string `json:"roomID"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
+	RoomName string `json:"room_name"`
+	Status   string `json:"status"`
+	Message  string `json:"message"`
 }
 
 type RoomRequestData struct {
-	RoomId string `json:"room_id"`
+	RoomName string `json:"room_name"`
 }
 
 func init() {
@@ -91,13 +99,8 @@ func init() {
 		log.Fatal(err)
 	}
 
-	_, err = db.Exec("CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY)")
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	// Register User struct for session
-	gob.Register(User{})
+	gob.Register(OAuthUser{})
 
 	// OAuth2 configuration
 	oauthConfig = &oauth2.Config{
@@ -151,7 +154,7 @@ func isAuthenticated(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session, _ := store.Get(r, "user-session")
 		fmt.Println("session: ", session.Values)
-		user, ok := session.Values["user"].(User)
+		user, ok := session.Values["user"].(OAuthUser)
 		if !ok || user.Email == "" {
 			log.Printf("User not authenticated. Session values: %+v", session.Values)
 			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -179,7 +182,7 @@ func getUserInfo(state string, code string) ([]byte, error) {
 	}
 	defer res.Body.Close()
 
-	var user User
+	var user OAuthUser
 	if json.NewDecoder(res.Body).Decode(&user); err != nil {
 		return nil, err
 	}
@@ -196,7 +199,7 @@ func healthCheck(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("healthy!!!!!!!!!!!")
 
 	session, _ := store.Get(r, "user-session")
-	user, ok := session.Values["user"].(User)
+	user, ok := session.Values["user"].(OAuthUser)
 	w.WriteHeader(http.StatusOK)
 	if ok {
 		fmt.Fprintf(w, "welcome %s！", user.Email)
@@ -220,8 +223,8 @@ func (s *WebSocketServer) findOrCreateRoom(w http.ResponseWriter, r *http.Reques
 	}
 
 	var exists bool
-	roomID := reqData.RoomId
-	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE id=$1)", roomID).Scan(&exists)
+	roomName := reqData.RoomName
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE name=$1)", roomName).Scan(&exists)
 	if err != nil {
 		http.Error(w, "Room does not exist", http.StatusNotFound)
 		return
@@ -230,9 +233,9 @@ func (s *WebSocketServer) findOrCreateRoom(w http.ResponseWriter, r *http.Reques
 	var res RoomResponse
 	if exists {
 		res = RoomResponse{
-			RoomID:  roomID,
-			Status:  "success",
-			Message: "ご指定のroomIDは既に存在します。",
+			RoomName: roomName,
+			Status:   "success",
+			Message:  "ご指定のroomNameは既に存在します。",
 		}
 	} else {
 		stmt, err := db.Prepare("INSERT INTO rooms(id) VALUES($1)")
@@ -241,16 +244,16 @@ func (s *WebSocketServer) findOrCreateRoom(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		_, err = stmt.Exec(roomID)
+		_, err = stmt.Exec(roomName)
 		if err != nil {
 			http.Error(w, "Error executing SQL statement", http.StatusInternalServerError)
 			return
 		}
 
 		res = RoomResponse{
-			RoomID:  roomID,
-			Status:  "success",
-			Message: "新しいroomを作成しました。",
+			RoomName: roomName,
+			Status:   "success",
+			Message:  "新しいroomを作成しました。",
 		}
 	}
 	w.Header().Set("content-type", "application/json")
@@ -261,7 +264,7 @@ func (s *WebSocketServer) findOrCreateRoom(w http.ResponseWriter, r *http.Reques
 
 func (s *WebSocketServer) findRoom(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	roomID := vars["roomID"]
+	roomName := vars["roomName"]
 
 	if db == nil {
 		http.Error(w, "Database not configured", http.StatusInternalServerError)
@@ -269,7 +272,7 @@ func (s *WebSocketServer) findRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE id=$1)", roomID).Scan(&exists)
+	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE name=$1)", roomName).Scan(&exists)
 	if err != nil {
 		http.Error(w, "Room does not exist", http.StatusNotFound)
 		return
@@ -278,15 +281,15 @@ func (s *WebSocketServer) findRoom(w http.ResponseWriter, r *http.Request) {
 	var res RoomResponse
 	if exists {
 		res = RoomResponse{
-			RoomID:  roomID,
-			Status:  "success",
-			Message: "Roomが見つかりました！",
+			RoomName: roomName,
+			Status:   "success",
+			Message:  "Roomが見つかりました！",
 		}
 	} else {
 		res = RoomResponse{
-			RoomID:  roomID,
-			Status:  "failed",
-			Message: "Roomは存在しません。",
+			RoomName: roomName,
+			Status:   "failed",
+			Message:  "Roomは存在しません。",
 		}
 	}
 	w.Header().Set("content-type", "application/json")
@@ -309,36 +312,36 @@ func (s *WebSocketServer) closeRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stmt, err := db.Prepare("UPDATE rooms SET is_closed = TRUE WHERE id = $1")
+	stmt, err := db.Prepare("UPDATE rooms SET is_closed = TRUE WHERE name=$1")
 	if err != nil {
 		http.Error(w, "Error preparing SQL statement", http.StatusInternalServerError)
 		return
 	}
-	roomID := reqData.RoomId
-	_, err = stmt.Exec(roomID)
+	roomName := reqData.RoomName
+	_, err = stmt.Exec(roomName)
 	if err != nil {
 		http.Error(w, "Error executing SQL statement", http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Fprintf(w, "Room %s closed", roomID)
+	fmt.Fprintf(w, "Room %s closed", roomName)
 }
 
 func (s *WebSocketServer) handleConnections(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	roomID := vars["roomID"]
+	roomName := vars["roomName"]
 
 	if db == nil {
 		http.Error(w, "Database not configured", http.StatusInternalServerError)
 		return
 	}
 
-	var exists bool
-	err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE id=$1)", roomID).Scan(&exists)
-	if err != nil || !exists {
-		http.Error(w, "Room does not exist", http.StatusNotFound)
-		return
-	}
+	// var exists bool
+	// err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE id=$1)", roomName).Scan(&exists)
+	// if err != nil || !exists {
+	// 	http.Error(w, "Room does not exist", http.StatusNotFound)
+	// 	return
+	// }
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -347,17 +350,16 @@ func (s *WebSocketServer) handleConnections(w http.ResponseWriter, r *http.Reque
 	}
 	defer conn.Close()
 
-	room, ok := s.rooms[roomID]
+	room, ok := s.rooms[roomName]
 	if !ok {
 		room = &WebSocketRoom{
-			id:      roomID,
+			id:      roomName,
 			clients: make(map[*websocket.Conn]bool),
 		}
-		s.rooms[roomID] = room
+		s.rooms[roomName] = room
 	}
 
 	room.clients[conn] = true
-
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -367,6 +369,34 @@ func (s *WebSocketServer) handleConnections(w http.ResponseWriter, r *http.Reque
 		}
 
 		fmt.Printf("message: %s\n", message)
+
+		// TODO: roomNameではなくroomIDをmuxで取れるようにしたほうがいい
+		var roomId string
+		if err := db.QueryRow("SELECT id FROM rooms WHERE name=$1", roomName).Scan(&roomId); err != nil {
+			http.Error(w, "Error querying room", http.StatusInternalServerError)
+			return
+		}
+
+		var userId string
+		session, _ := store.Get(r, "user-session")
+		user, _ := session.Values["user"].(OAuthUser)
+		if err := db.QueryRow("SELECT id FROM users WHERE google_oauth_id=$1", user.ID).Scan(&userId); err != nil {
+			http.Error(w, "Error querying user", http.StatusInternalServerError)
+			return
+		}
+
+		stmt, err := db.Prepare("INSERT INTO messages(room_id, user_id, content) VALUES($1, $2, $3)")
+		if err != nil {
+			http.Error(w, "Error preparing SQL statement", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = stmt.Exec(roomId, userId, string(message))
+		if err != nil {
+			http.Error(w, "Error executing SQL statement", http.StatusInternalServerError)
+			return
+		}
+
 		for client := range room.clients {
 			if err := client.WriteMessage(websocket.TextMessage, message); err != nil {
 				log.Println(err)
@@ -379,7 +409,7 @@ func (s *WebSocketServer) handleConnections(w http.ResponseWriter, r *http.Reque
 
 func (s *WebSocketServer) joinRoom(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	roomID := vars["roomID"]
+	roomName := vars["roomName"]
 
 	if db == nil {
 		http.Error(w, "Database not configured", http.StatusInternalServerError)
@@ -387,7 +417,7 @@ func (s *WebSocketServer) joinRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var isClosed bool
-	err := db.QueryRow("SELECT is_closed FROM rooms WHERE id=$1", roomID).Scan(&isClosed)
+	err := db.QueryRow("SELECT is_closed FROM rooms WHERE name=$1", roomName).Scan(&isClosed)
 	if err != nil {
 		http.Error(w, "Room does not exist", http.StatusNotFound)
 		return
@@ -399,15 +429,21 @@ func (s *WebSocketServer) joinRoom(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var exists bool
-	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE id=$1)", roomID).Scan(&exists)
+	err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM rooms WHERE name=$1)", roomName).Scan(&exists)
 	if err != nil || !exists {
 		http.Error(w, "Room does not exist", http.StatusNotFound)
 		return
 	}
 
+	session, _ := store.Get(r, "user-session")
+	user, _ := session.Values["user"].(OAuthUser)
+	userName := strings.Split(strings.Split(user.Email, "@")[0], ".")[1]
 	data := map[string]string{
-		"Title":  "チャットルーム",
-		"RoomID": roomID,
+		"Title":    "チャットルーム",
+		"RoomName": roomName,
+		"Email":    user.Email,
+		"Picture":  user.Picture,
+		"Name":     userName,
 	}
 	t := template.Must(template.ParseFS(resources, "templates/*"))
 	err = t.ExecuteTemplate(w, "room.html.tmpl", data)
@@ -433,7 +469,7 @@ func (s *WebSocketServer) findAllRooms(w http.ResponseWriter, r *http.Request) {
 	var rooms []Room
 	for rows.Next() {
 		var room Room
-		err := rows.Scan(&room.ID, &room.IsClosed)
+		err := rows.Scan(&room.ID, &room.Name, &room.IsClosed)
 		if err != nil {
 			http.Error(w, "Error scanning rooms", http.StatusInternalServerError)
 			return
@@ -469,7 +505,7 @@ func healthCheckTemplate(w http.ResponseWriter, r *http.Request) {
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "user-session")
 	// ログイン情報があればcallbackと同じHTMLのroomsを表示
-	if user, ok := session.Values["user"].(User); ok && user.Email != "" {
+	if user, ok := session.Values["user"].(OAuthUser); ok && user.Email != "" {
 		fmt.Println("User already authenticated: ", user)
 		t := template.Must(template.ParseFS(resources, "templates/*"))
 		if err := t.ExecuteTemplate(w, "rooms.html.tmpl", user); err != nil {
@@ -499,7 +535,7 @@ func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
 	session, _ := store.Get(r, "user-session")
 	// ログイン情報があればcallbackと同じHTMLのroomsを表示
-	if user, ok := session.Values["user"].(User); ok && user.Email != "" {
+	if user, ok := session.Values["user"].(OAuthUser); ok && user.Email != "" {
 		fmt.Println("User already authenticated: ", user)
 		t := template.Must(template.ParseFS(resources, "templates/*"))
 		if err := t.ExecuteTemplate(w, "rooms.html.tmpl", user); err != nil {
@@ -516,7 +552,7 @@ func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse user info
-	var user User
+	var user OAuthUser
 	if err := json.Unmarshal(content, &user); err != nil {
 		log.Printf("Failed to parse user info: %v", err)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
@@ -539,6 +575,26 @@ func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if db == nil {
+		http.Error(w, "Database not configured", http.StatusInternalServerError)
+		return
+	}
+
+	userName := strings.Split(strings.Split(user.Email, "@")[0], ".")[1]
+	// NOTE: ORM使ってないのでDTO作る必要ナッシング
+	userDTO := UserDTO{
+		Name:          userName,
+		Email:         user.Email,
+		Picture:       user.Picture,
+		GoogleOauthId: user.ID,
+	}
+	query := `INSERT INTO users (name, email, picture, google_oauth_id) VALUES ($1, $2, $3, $4) ON CONFLICT (google_oauth_id) DO NOTHING`
+	err = db.QueryRow(query, userDTO.Name, userDTO.Email, userDTO.Picture, userDTO.GoogleOauthId).Scan()
+	if err != nil {
+		log.Printf("Failed to insert user: %v", err)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+	}
+
 	t := template.Must(template.ParseFS(resources, "templates/*"))
 	if err := t.ExecuteTemplate(w, "callback.html.tmpl", user); err != nil {
 		http.Error(w, "Template parse error", http.StatusNotFound)
@@ -552,7 +608,7 @@ func handleProtected(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user := session.Values["user"].(User)
+	user := session.Values["user"].(OAuthUser)
 	fmt.Fprintf(w, "welcome %s！", user.Email)
 }
 
@@ -572,9 +628,9 @@ func main() {
 	// Protected routes
 	r.HandleFunc("/protected", isAuthenticated(handleProtected))
 	r.HandleFunc("/rooms", isAuthenticated(s.findAllRooms))
-	r.HandleFunc("/rooms/{roomID}", isAuthenticated(s.joinRoom))
-	r.HandleFunc("/room/{roomID}", isAuthenticated(s.findRoom))
-	r.HandleFunc("/ws/{roomID}", isAuthenticated(s.handleConnections))
+	r.HandleFunc("/rooms/{roomName}", isAuthenticated(s.joinRoom))
+	r.HandleFunc("/room/{roomName}", isAuthenticated(s.findRoom))
+	r.HandleFunc("/ws/{roomName}", isAuthenticated(s.handleConnections))
 
 	origins := []string{"*"}
 
