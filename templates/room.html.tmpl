@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>{{.Title}}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        background-color: #f4f4f4;
+      }
+      .container {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background: white;
+        padding: 20px;
+        width: 320px; /* 固定幅 */
+        height: 40vh;
+        max-width: 100%; /* 小さい画面での調整 */
+        border-radius: 10px;
+      }
+      h1 {
+        color: #333;
+      }
+      p {
+        color: #666;
+      }
+      img {
+        width: 100px;
+        height: 100px;
+        border-radius: 50%;
+        object-fit: cover;
+      }
+      /* チャットのテキストエリア */
+      .chat-textarea {
+        width: 100%;
+        padding: 10px;
+        font-size: 16px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+        resize: none; /* ユーザーがサイズ変更できないようにする */
+        height: 60px;
+      }
+
+      /* 送信ボタン */
+      .send-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 20px;
+        margin-top: 10px;
+        font-size: 16px;
+        color: #fff;
+        background-color: #2196f3; /* Slackのテーマカラーに近い青 */
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        text-align: center;
+      }
+
+      .send-button:hover {
+        background-color: #1976d2; /* マウスオーバー時の色 */
+      }
+
+      .send-button i {
+        margin-right: 8px;
+      }
+
+      /* フォーカス時のテキストエリアとボタン */
+      .send-button:focus {
+        outline: none;
+        box-shadow: 0 0 4px rgba(33, 150, 243, 0.5);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h3>RoomID: {{.RoomID}}</h3>
+      <img src="{{.Picture}}" alt="{{.Email}}">
+      <div>
+        <textarea class="chat-textarea" placeholder="チャット..."></textarea>
+        <button class="send-button" onclick="sendMessage()"><i class="fas fa-paper-plane"></i></button>
+      </div>
+      <p>直前のコメント: <span id="serverMessage">まだ何も投稿してないよ</span></p>
+    </div>
+
+    <script>
+      var socket;
+      let reconnectInterval = 5000;
+
+      function connectWebSocket(roomID) {
+        wsScheme = window.location.protocol === "https:" ? "wss://" : "ws://";
+        wsUrl = wsScheme + window.location.host + "/ws/" + roomID;
+        socket = new WebSocket(wsUrl);
+
+        socket.onopen = function(event) {
+          console.log("WebSocket is open now.");
+          socket.send("Hello from the client!");
+        };
+
+        socket.onmessage = function(event) {
+          console.log("Message from server ", event.data);
+          document.getElementById("serverMessage").innerText = event.data;
+        };
+
+        socket.onclose = function(event) {
+          console.log("WebSocket is closed now.");
+        };
+
+        socket.onerror = function(error) {
+          console.log("WebSocket error: ", error);
+        };
+      }
+
+      function sendMessage() {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send("Client says hello!");
+        } else {
+          alert("WebSocket is not connected.");
+        }
+      }
+
+      window.onload = function() {
+        const roomId = "{{.RoomID | js}}";
+        connectWebSocket(roomId);
+      }
+    </script>
+  </body>
+</html>
