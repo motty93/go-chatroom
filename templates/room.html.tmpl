@@ -24,7 +24,6 @@
         background: white;
         padding: 20px;
         width: 320px; /* 固定幅 */
-        height: 40vh;
         max-width: 100%; /* 小さい画面での調整 */
         border-radius: 10px;
       }
@@ -40,6 +39,15 @@
         border-radius: 50%;
         object-fit: cover;
       }
+
+      .chat-container {
+        width: 100%;
+        margin-top: 10px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
       /* チャットのテキストエリア */
       .chat-textarea {
         width: 100%;
@@ -49,16 +57,13 @@
         border-radius: 4px;
         box-sizing: border-box;
         resize: none; /* ユーザーがサイズ変更できないようにする */
-        height: 60px;
+        height: 50px;
       }
 
       /* 送信ボタン */
       .send-button {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 10px 20px;
-        margin-top: 10px;
+        padding: 5px 10px;
+        margin-left: 5px;
         font-size: 16px;
         color: #fff;
         background-color: #2196f3; /* Slackのテーマカラーに近い青 */
@@ -72,40 +77,75 @@
         background-color: #1976d2; /* マウスオーバー時の色 */
       }
 
-      .send-button i {
-        margin-right: 8px;
-      }
-
       /* フォーカス時のテキストエリアとボタン */
       .send-button:focus {
         outline: none;
         box-shadow: 0 0 4px rgba(33, 150, 243, 0.5);
       }
+
+      .send-button.disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+        pointer-events: none;
+      }
+
+      .latest-comment-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        margin-top: 10px;
+        color: #666;
+        font-size: 14px;
+      }
+
+      #serverMessage {
+        display: inline-block;
+        font-size: 12px;
+        color: #333;
+        margin-top: 5px;
+      }
     </style>
   </head>
   <body>
     <div class="container">
-      <h3>RoomID: {{.RoomID}}</h3>
+      <h3>部屋名: {{.RoomName}}</h3>
       <img src="{{.Picture}}" alt="{{.Email}}">
-      <div>
-        <textarea class="chat-textarea" placeholder="チャット..."></textarea>
-        <button class="send-button" onclick="sendMessage()"><i class="fas fa-paper-plane"></i></button>
+      <div class="chat-container">
+        <textarea class="chat-textarea" placeholder="チャット..." oninput="toggleIconState()"></textarea>
+        <button class="send-button disabled" onclick="sendMessage()"><i class="fas fa-paper-plane"></i></button>
       </div>
-      <p>直前のコメント: <span id="serverMessage">まだ何も投稿してないよ</span></p>
+      <div class="latest-comment-container">
+        直前のコメント
+        <span id="serverMessage">まだ何も投稿してないよ</span>
+      </div>
     </div>
 
     <script>
       var socket;
       let reconnectInterval = 5000;
 
-      function connectWebSocket(roomID) {
+      function toggleIconState() {
+        const textarea = document.querySelector(".chat-textarea");
+        const icon = document.querySelector(".send-button");
+        if (textarea.value.trim() === "") {
+          icon.classList.add("disabled");
+          icon.onclick = null;
+        } else {
+          icon.classList.remove("disabled");
+          icon.onclick = sendMessage;
+        }
+      }
+
+      function connectWebSocket(roomName) {
         wsScheme = window.location.protocol === "https:" ? "wss://" : "ws://";
-        wsUrl = wsScheme + window.location.host + "/ws/" + roomID;
+        wsUrl = wsScheme + window.location.host + "/ws/" + roomName;
         socket = new WebSocket(wsUrl);
 
         socket.onopen = function(event) {
           console.log("WebSocket is open now.");
-          socket.send("Hello from the client!");
+          const name = "{{.Name | js}}";
+          socket.send(`${name}さんがチャットに参加しました！`);
         };
 
         socket.onmessage = function(event) {
@@ -115,6 +155,7 @@
 
         socket.onclose = function(event) {
           console.log("WebSocket is closed now.");
+          setTimeout(connectWebSocket(roomName), reconnectInterval);
         };
 
         socket.onerror = function(error) {
@@ -124,15 +165,18 @@
 
       function sendMessage() {
         if (socket && socket.readyState === WebSocket.OPEN) {
-          socket.send("Client says hello!");
+          const input = document.querySelector(".chat-textarea");
+          socket.send(input.value);
+          input.value = "";
+          document.querySelector(".send-button").classList.add("disabled");
         } else {
-          alert("WebSocket is not connected.");
+          alert("チャットに接続できませんでした。\nリロードして再接続してください。");
         }
       }
 
       window.onload = function() {
-        const roomId = "{{.RoomID | js}}";
-        connectWebSocket(roomId);
+        const roomName = "{{.RoomName | js}}";
+        connectWebSocket(roomName);
       }
     </script>
   </body>
