@@ -550,6 +550,7 @@ func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("getUserInfo")
 	content, err := getUserInfo(r.FormValue("state"), r.FormValue("code"))
 	if err != nil {
+		log.Printf("Failed to get user info: %v", err)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
@@ -567,6 +568,7 @@ func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
 	// check androots domain
 	emailDomain := strings.Split(user.Email, "@")[1]
 	if !isAllowedDomain(emailDomain) {
+		log.Printf("Invalid domain: %s", emailDomain)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
@@ -581,6 +583,7 @@ func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
 
 	if db == nil {
 		http.Error(w, "Database not configured", http.StatusInternalServerError)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
 
