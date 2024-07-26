@@ -547,12 +547,14 @@ func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	fmt.Println("getUserInfo")
 	content, err := getUserInfo(r.FormValue("state"), r.FormValue("code"))
 	if err != nil {
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
 
+	fmt.Println("callback content: ", string(content))
 	// Parse user info
 	var user OAuthUser
 	if err := json.Unmarshal(content, &user); err != nil {
