@@ -529,6 +529,7 @@ func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// User the state string in the AuthCodeURL
 	url := oauthConfig.AuthCodeURL(oauthStateString)
+	fmt.Println("login! callback url: ", url)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
