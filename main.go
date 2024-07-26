@@ -533,6 +533,7 @@ func handleGoogleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("callback!")
 	session, _ := store.Get(r, "user-session")
 	// ログイン情報があればcallbackと同じHTMLのroomsを表示
 	if user, ok := session.Values["user"].(OAuthUser); ok && user.Email != "" {
