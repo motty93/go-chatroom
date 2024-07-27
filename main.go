@@ -598,8 +598,10 @@ func handleGoogleCallBack(w http.ResponseWriter, r *http.Request) {
 	query := `INSERT INTO users (name, email, picture, google_oauth_id) VALUES ($1, $2, $3, $4) ON CONFLICT (google_oauth_id) DO NOTHING`
 	err = db.QueryRow(query, userDTO.Name, userDTO.Email, userDTO.Picture, userDTO.GoogleOauthId).Scan()
 	if err != nil {
+		// google_oauth_idで重複している場合はエラーになるが、それは正常なのでログだけ出してリダイレクト
 		log.Printf("Failed to insert user: %v", err)
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+		return
 	}
 
 	t := template.Must(template.ParseFS(resources, "templates/*"))
